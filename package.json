@@ -1,0 +1,26 @@
+{
+  "name": "caseworker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Caseworker — a voice-first AI agent that navigates painful real-world paperwork: benefits applications, insurance appeals, financial aid, and medical-billing disputes.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "mcp": "node --experimental-strip-types mcp/server.ts"
+  },
+  "dependencies": {
+    "next": "^16.2.7",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.0",
+    "zod": "^3.24.0"
+  }
+}
