@@ -1,6 +1,29 @@
-# Caseworker 🪪⚖️
+<div align="center">
 
-**Your AI advocate for impossible paperwork.**
+# ⚖️ Caseworker
+
+### Your AI advocate for impossible paperwork
+
+[![Live Demo](https://img.shields.io/badge/▶_Live_Demo-caseworker--eta.vercel.app-0e7c5a?style=for-the-badge)](https://caseworker-eta.vercel.app)
+&nbsp;
+[![Deployed on Vercel](https://img.shields.io/badge/Deployed-Vercel-000?style=for-the-badge&logo=vercel)](https://caseworker-eta.vercel.app)
+
+![Next.js](https://img.shields.io/badge/Next.js_16-000?logo=next.js&logoColor=white)
+![React](https://img.shields.io/badge/React_19-20232a?logo=react)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178c6?logo=typescript&logoColor=white)
+![Gemini](https://img.shields.io/badge/Gemini_2.5_Flash-1a73e8?logo=googlegemini&logoColor=white)
+![Claude](https://img.shields.io/badge/Claude-d97757?logo=anthropic&logoColor=white)
+![ElevenLabs](https://img.shields.io/badge/ElevenLabs-000)
+![MCP](https://img.shields.io/badge/MCP_Server-6d8bff)
+![License: MIT](https://img.shields.io/badge/License-MIT-green)
+
+<br />
+
+![Caseworker](docs/hero.png)
+
+</div>
+
+---
 
 Paste the letter that's ruining your week — a denied insurance claim, a SNAP
 benefits cut, a surprise ER bill, a thin financial-aid offer — and Caseworker:
@@ -31,14 +54,22 @@ Open the app → click a sample (**Insurance denial**, **SNAP reduction**, or
 **Surprise ER bill**) → hit **Analyze**. You'll get the full advocacy plan and a
 drafted appeal in seconds.
 
+![Caseworker analyzing a surprise medical bill](docs/tool.png)
+
 **No API keys?** It still works, fully. Caseworker ships a deterministic *demo
 mode* that does real extraction — it computes a **live deadline countdown**,
 pulls amounts and case numbers, drafts the response, and reads it aloud via the
 browser's speech engine. Samples are dated **relative to today**, so the
-countdown is always realistic. Add `ANTHROPIC_API_KEY` to switch to live Claude
-reasoning and `ELEVENLABS_API_KEY` for premium voice.
+countdown is always realistic.
 
-**Live:** https://caseworker-eta.vercel.app
+**Want live AI?** Set **either** key — the reasoning core picks the best
+available (Claude → Gemini → demo):
+
+- `GEMINI_API_KEY` — Google's **free tier**, uses `gemini-2.5-flash-lite`. The
+  live demo runs on this. Get one at <https://aistudio.google.com/apikey>.
+- `ANTHROPIC_API_KEY` — Claude, for top-tier quality (pay-as-you-go).
+
+**Live:** https://caseworker-eta.vercel.app (currently powered by Gemini)
 
 ---
 
