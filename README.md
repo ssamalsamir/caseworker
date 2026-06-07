@@ -25,8 +25,9 @@
 
 ---
 
-Paste the letter that's ruining your week — a denied insurance claim, a SNAP
-benefits cut, a surprise ER bill, a thin financial-aid offer — and Caseworker:
+Snap a photo of the letter that's ruining your week — a denied insurance claim,
+a SNAP benefits cut, a surprise ER bill, a thin financial-aid offer — or paste
+the text, and Caseworker:
 
 1. **Explains it in plain English** (8th-grade reading level, no jargon).
 2. **Surfaces your rights** in that specific situation.
@@ -50,9 +51,9 @@ cp .env.example .env.local   # optional — works with NO keys in demo mode
 npm run dev                  # http://localhost:3000
 ```
 
-Open the app → click a sample (**Insurance denial**, **SNAP reduction**, or
-**Surprise ER bill**) → hit **Analyze**. You'll get the full advocacy plan and a
-drafted appeal in seconds.
+Open the app → **drop in a photo or PDF of a real letter** (or click a sample:
+**Insurance denial**, **SNAP reduction**, **Surprise ER bill**) → hit
+**Analyze**. You'll get the full advocacy plan and a drafted appeal in seconds.
 
 ![Caseworker analyzing a surprise medical bill](docs/tool.png)
 
@@ -109,7 +110,9 @@ sponsor judges can see exactly what you used and why.
 (`return_analysis`) to guarantee clean structured output — summary, rights,
 deadlines, actions, and the drafted letter. Claude is the brain: it reads
 adversarial bureaucratic language and produces an accurate, non-hallucinated
-advocacy plan. Model is configurable via `CASEWORKER_MODEL`.
+advocacy plan. Upload a **photo or PDF** of the letter and Claude reads it
+directly via vision / `document` blocks — no separate OCR step. Model is
+configurable via `CASEWORKER_MODEL`.
 → Set `ANTHROPIC_API_KEY`.
 
 ### ElevenLabs — voice (accessibility)
@@ -192,11 +195,17 @@ app/
   api/analyze/route.ts  Claude reasoning endpoint
   api/speak/route.ts    ElevenLabs TTS endpoint
 lib/
-  caseworker.ts         the agent: prompt, schema, Claude call, demo fallback
+  caseworker.ts         the agent: prompt, schema, vision/PDF, demo fallback
   samples.ts            real-feeling sample documents
 mcp/
   server.ts             Model Context Protocol server (stdio)
+test/
+  caseworker.test.ts    unit tests for the deterministic core
 ```
+
+Run the tests with `npm test` — Node's built-in runner (`node --test`), no extra
+dependencies. They cover date parsing, deadline extraction, the demo analyzer,
+and the no-model-for-file guard.
 
 ## ⚖️ Disclaimer
 

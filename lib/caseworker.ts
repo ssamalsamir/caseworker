@@ -29,6 +29,33 @@ export interface CaseAnalysis {
   source: "claude" | "gemini" | "demo";
 }
 
+// A document supplied as an image or PDF, base64-encoded (no data: URL prefix).
+export type FileInput = { mediaType: string; data: string; name?: string };
+
+// What the agent accepts: pasted text, an uploaded file, or both.
+export type CaseInput = string | { documentText?: string; file?: FileInput };
+
+// Media types the vision/document models can read. (Plain .txt is loaded into
+// the textarea on the client, so it never reaches the server as a file.)
+export const ACCEPTED_FILE_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+] as const;
+
+// Thrown when a file is uploaded but no model (Claude/Gemini) is configured.
+// Demo mode does regex extraction on text and cannot read an image or PDF.
+export class NoModelForFileError extends Error {
+  constructor() {
+    super(
+      "Reading a photo or PDF needs an AI model. Add a free GEMINI_API_KEY (or ANTHROPIC_API_KEY), or paste the document text instead."
+    );
+    this.name = "NoModelForFileError";
+  }
+}
+
 export const DOMAINS = [
   { id: "benefits", label: "Government benefits (SNAP, Medicaid, disability)" },
   { id: "insurance", label: "Insurance appeal (denied claim / prior auth)" },
@@ -153,20 +180,28 @@ const GEMINI_SCHEMA = {
 
 type ModelOutput = Omit<CaseAnalysis, "domain" | "source">;
 
-function userPrompt(documentText: string, domain: string): string {
-  return `The person is dealing with: ${domain}.\n\nHere is the document they received:\n\n"""\n${documentText.slice(0, 12000)}\n"""\n\nAnalyze it and return the structured advocacy plan.`;
+function userPrompt(documentText: string, domain: string, hasFile: boolean): string {
+  const text = documentText.trim();
+  const body = hasFile
+    ? `The document they received is attached as a file (an image or a PDF). Read it carefully and extract everything you need from it.${
+        text ? `\n\nThey also added this note:\n"""\n${text.slice(0, 4000)}\n"""` : ""
+      }`
+    : `Here is the document they received:\n\n"""\n${text.slice(0, 12000)}\n"""`;
+  return `The person is dealing with: ${domain}.\n\n${body}\n\nAnalyze it and return the structured advocacy plan.`;
 }
 
 export async function runCaseworker(
-  documentText: string,
+  input: CaseInput,
   domainId: string
 ): Promise<CaseAnalysis> {
+  const documentText = typeof input === "string" ? input : input.documentText ?? "";
+  const file = typeof input === "string" ? undefined : input.file;
   const domain = DOMAINS.find((d) => d.id === domainId)?.label ?? "General";
 
   // Provider priority: Claude → Gemini → demo. Each falls through on failure.
   if (process.env.ANTHROPIC_API_KEY) {
     try {
-      const out = await runClaude(documentText, domain);
+      const out = await runClaude(documentText, domain, file);
       return finalize(out, documentText, domain, "claude");
     } catch (err) {
       console.error("[caseworker] Claude failed, trying next provider:", err);
@@ -175,12 +210,15 @@ export async function runCaseworker(
 
   if (process.env.GEMINI_API_KEY) {
     try {
-      const out = await runGemini(documentText, domain);
+      const out = await runGemini(documentText, domain, file);
       return finalize(out, documentText, domain, "gemini");
     } catch (err) {
-      console.error("[caseworker] Gemini failed, using demo mode:", err);
+      console.error("[caseworker] Gemini failed, falling back:", err);
     }
   }
+
+  // Demo mode reads text only — a photo/PDF needs a real model.
+  if (file) throw new NoModelForFileError();
 
   return demoAnalysis(documentText, domainId, domain);
 }
@@ -207,7 +245,27 @@ function finalize(
   return { ...out, deadlines, severity, domain, source };
 }
 
-async function runClaude(documentText: string, domain: string): Promise<ModelOutput> {
+// Build the user-turn content: an optional image/PDF block, then the prompt.
+// Claude reads images via `image` blocks and PDFs via `document` blocks — both
+// base64, no beta header needed on current models.
+function claudeContent(documentText: string, domain: string, file?: FileInput) {
+  const blocks: Record<string, unknown>[] = [];
+  if (file) {
+    const kind = file.mediaType === "application/pdf" ? "document" : "image";
+    blocks.push({
+      type: kind,
+      source: { type: "base64", media_type: file.mediaType, data: file.data },
+    });
+  }
+  blocks.push({ type: "text", text: userPrompt(documentText, domain, !!file) });
+  return blocks;
+}
+
+async function runClaude(
+  documentText: string,
+  domain: string,
+  file?: FileInput
+): Promise<ModelOutput> {
   const model = process.env.CASEWORKER_MODEL || "claude-sonnet-4-6";
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -218,11 +276,11 @@ async function runClaude(documentText: string, domain: string): Promise<ModelOut
     },
     body: JSON.stringify({
       model,
-      max_tokens: 2000,
+      max_tokens: 4096,
       system: SYSTEM_PROMPT,
       tools: [ANALYSIS_TOOL],
       tool_choice: { type: "tool", name: "return_analysis" },
-      messages: [{ role: "user", content: userPrompt(documentText, domain) }],
+      messages: [{ role: "user", content: claudeContent(documentText, domain, file) }],
     }),
   });
   if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
@@ -232,19 +290,26 @@ async function runClaude(documentText: string, domain: string): Promise<ModelOut
   return toolUse.input as ModelOutput;
 }
 
-async function runGemini(documentText: string, domain: string): Promise<ModelOutput> {
+async function runGemini(
+  documentText: string,
+  domain: string,
+  file?: FileInput
+): Promise<ModelOutput> {
   const model = process.env.CASEWORKER_GEMINI_MODEL || "gemini-2.5-flash-lite";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+  const parts: Record<string, unknown>[] = [];
+  if (file) parts.push({ inline_data: { mime_type: file.mediaType, data: file.data } });
+  parts.push({ text: userPrompt(documentText, domain, !!file) });
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-      contents: [{ role: "user", parts: [{ text: userPrompt(documentText, domain) }] }],
+      contents: [{ role: "user", parts }],
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: GEMINI_SCHEMA,
-        maxOutputTokens: 2400,
+        maxOutputTokens: 3072,
         temperature: 0.4,
       },
     }),
@@ -268,7 +333,7 @@ const MONTHS: Record<string, number> = {
   jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
 };
 
-function parseDate(s: string): Date | null {
+export function parseDate(s: string): Date | null {
   if (!s) return null;
   // 1) Month-name form (most common in these letters), parsed locally.
   const m = DATE_RE.exec(s);
@@ -285,7 +350,7 @@ function parseDate(s: string): Date | null {
   return null;
 }
 
-function daysBetween(target: Date): number {
+export function daysBetween(target: Date): number {
   const now = new Date();
   const a = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   const b = Date.UTC(target.getFullYear(), target.getMonth(), target.getDate());
@@ -293,7 +358,7 @@ function daysBetween(target: Date): number {
 }
 
 // Find the most likely deadline: prefer a date that follows a deadline cue.
-function findDeadline(text: string): { date: string; daysLeft: number | null } | null {
+export function findDeadline(text: string): { date: string; daysLeft: number | null } | null {
   const cue =
     /(?:no later than|must be received(?:\s+(?:by|no later than))?|received by|appeal by|respond by|due (?:by|on)|before|by)\s+([A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})/i;
   const cued = text.match(cue)?.[1];
@@ -399,12 +464,11 @@ function demoAnalysis(
 
   const t = templates[domainId] ?? templates.benefits;
 
+  // These documents (denials, bills, notices) are always actionable; we only
+  // escalate to "urgent" when a deadline is within 30 days. A document with no
+  // detectable deadline still needs action — hence the action_needed default.
   const severity: Severity =
-    daysLeft != null && daysLeft <= 30
-      ? "urgent"
-      : deadline
-      ? "action_needed"
-      : "action_needed";
+    daysLeft != null && daysLeft <= 30 ? "urgent" : "action_needed";
 
   const urgencyLine =
     daysLeft != null

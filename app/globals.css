@@ -134,6 +134,41 @@ a:hover { text-decoration: underline; }
 }
 .chip:hover { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-tint); }
 
+/* ── Upload (photo / PDF) ── */
+.dropwrap.drag .dropzone { border-color: var(--accent); background: var(--accent-tint); color: var(--accent-ink); }
+.dropzone {
+  width: 100%; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 22px 16px; border: 1.5px dashed var(--line-strong); border-radius: 12px;
+  background: #fff; color: var(--muted); cursor: pointer; text-align: center;
+  font-family: inherit; transition: border-color .15s, background .15s, color .15s;
+}
+.dropzone:hover { border-color: var(--accent); background: var(--accent-tint); color: var(--accent-ink); }
+.dropzone svg { color: var(--accent-ink); }
+.dz-main { font-size: 14px; font-weight: 600; color: var(--ink); }
+.dz-sub { font-size: 12.5px; color: var(--faint); }
+
+.filechip {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px; border: 1px solid var(--line-strong); border-radius: 12px; background: #fff;
+}
+.fc-thumb {
+  width: 46px; height: 46px; border-radius: 8px; object-fit: cover; flex: none;
+  border: 1px solid var(--line);
+}
+.fc-thumb.pdf {
+  display: grid; place-items: center; background: var(--urgent-tint); color: var(--urgent);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em; border-color: var(--urgent-line);
+}
+.fc-meta { min-width: 0; flex: 1; }
+.fc-name { font-size: 13.5px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fc-sub { font-size: 12px; color: var(--accent-ink); margin-top: 2px; }
+.fc-x {
+  flex: none; width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--line-strong);
+  background: #fff; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer;
+  display: grid; place-items: center; transition: border-color .15s, background .15s, color .15s;
+}
+.fc-x:hover { color: var(--urgent); border-color: var(--urgent-line); background: var(--urgent-tint); }
+
 select, textarea {
   width: 100%; font-family: inherit; font-size: 14.5px; color: var(--ink);
   background: #fff; border: 1px solid var(--line-strong); border-radius: 10px; padding: 12px;
