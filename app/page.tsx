@@ -335,7 +335,9 @@ export default function Home() {
                       <span className="led" />
                       {result.source === "claude"
                         ? "Generated live by Claude"
-                        : "Demo mode — add ANTHROPIC_API_KEY for live Claude reasoning"}
+                        : result.source === "gemini"
+                        ? "Generated live by Gemini"
+                        : "Demo mode — add an API key for live reasoning"}
                     </div>
                   </div>
                 </div>

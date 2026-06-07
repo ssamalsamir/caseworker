@@ -4,9 +4,11 @@
 // EOB, a medical bill, a financial-aid letter), it returns a structured
 // analysis plus a ready-to-send appeal/response drafted on the user's behalf.
 //
-// Design goal: ALWAYS return something useful. With ANTHROPIC_API_KEY set it
-// uses Claude. Without it, it falls back to a deterministic demo analysis so a
-// live demo never dies because of a missing key or rate limit.
+// Design goal: ALWAYS return something useful. Provider priority:
+//   ANTHROPIC_API_KEY -> Claude   (best quality)
+//   GEMINI_API_KEY    -> Gemini   (free tier, low-cost flash models)
+//   neither           -> deterministic demo analysis
+// so a live demo never dies because of a missing key or rate limit.
 
 export type Severity = "info" | "action_needed" | "urgent";
 
@@ -24,7 +26,7 @@ export interface CaseAnalysis {
   recommendedActions: string[];
   draftResponse: { title: string; body: string };
   spokenSummary: string; // short, friendly, for text-to-speech
-  source: "claude" | "demo";
+  source: "claude" | "gemini" | "demo";
 }
 
 export const DOMAINS = [
@@ -100,59 +102,158 @@ const ANALYSIS_TOOL = {
   },
 } as const;
 
+// Gemini structured-output schema (OpenAPI subset) — mirrors ANALYSIS_TOOL.
+const GEMINI_SCHEMA = {
+  type: "object",
+  properties: {
+    documentType: { type: "string" },
+    severity: { type: "string", enum: ["info", "action_needed", "urgent"] },
+    summary: { type: "string" },
+    keyFacts: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { label: { type: "string" }, value: { type: "string" } },
+        required: ["label", "value"],
+      },
+    },
+    yourRights: { type: "array", items: { type: "string" } },
+    deadlines: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          what: { type: "string" },
+          date: { type: "string" },
+          daysLeft: { type: "number", nullable: true },
+        },
+        required: ["what", "date"],
+      },
+    },
+    recommendedActions: { type: "array", items: { type: "string" } },
+    draftResponse: {
+      type: "object",
+      properties: { title: { type: "string" }, body: { type: "string" } },
+      required: ["title", "body"],
+    },
+    spokenSummary: { type: "string" },
+  },
+  required: [
+    "documentType",
+    "severity",
+    "summary",
+    "keyFacts",
+    "yourRights",
+    "deadlines",
+    "recommendedActions",
+    "draftResponse",
+    "spokenSummary",
+  ],
+} as const;
+
+type ModelOutput = Omit<CaseAnalysis, "domain" | "source">;
+
+function userPrompt(documentText: string, domain: string): string {
+  return `The person is dealing with: ${domain}.\n\nHere is the document they received:\n\n"""\n${documentText.slice(0, 12000)}\n"""\n\nAnalyze it and return the structured advocacy plan.`;
+}
+
 export async function runCaseworker(
   documentText: string,
   domainId: string
 ): Promise<CaseAnalysis> {
   const domain = DOMAINS.find((d) => d.id === domainId)?.label ?? "General";
-  const key = process.env.ANTHROPIC_API_KEY;
 
-  if (!key) {
-    return demoAnalysis(documentText, domainId, domain);
-  }
-
-  const model = process.env.CASEWORKER_MODEL || "claude-sonnet-4-6";
-
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 2000,
-        system: SYSTEM_PROMPT,
-        tools: [ANALYSIS_TOOL],
-        tool_choice: { type: "tool", name: "return_analysis" },
-        messages: [
-          {
-            role: "user",
-            content: `The person is dealing with: ${domain}.\n\nHere is the document they received:\n\n"""\n${documentText.slice(0, 12000)}\n"""\n\nAnalyze it and return the structured advocacy plan.`,
-          },
-        ],
-      }),
-    });
-
-    if (!res.ok) {
-      throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
+  // Provider priority: Claude → Gemini → demo. Each falls through on failure.
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      const out = await runClaude(documentText, domain);
+      return finalize(out, documentText, domain, "claude");
+    } catch (err) {
+      console.error("[caseworker] Claude failed, trying next provider:", err);
     }
-
-    const data = await res.json();
-    const toolUse = (data.content || []).find(
-      (c: { type: string }) => c.type === "tool_use"
-    );
-    if (!toolUse) throw new Error("No tool_use block in Claude response");
-
-    const out = toolUse.input as Omit<CaseAnalysis, "domain" | "source">;
-    return { ...out, domain, source: "claude" };
-  } catch (err) {
-    // Never fail the demo — fall back to deterministic analysis.
-    console.error("[caseworker] Claude call failed, using demo mode:", err);
-    return demoAnalysis(documentText, domainId, domain);
   }
+
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const out = await runGemini(documentText, domain);
+      return finalize(out, documentText, domain, "gemini");
+    } catch (err) {
+      console.error("[caseworker] Gemini failed, using demo mode:", err);
+    }
+  }
+
+  return demoAnalysis(documentText, domainId, domain);
+}
+
+// Recompute daysLeft from each deadline's date string with the server clock —
+// models don't reliably know "today", so we never trust their countdown.
+function finalize(
+  out: ModelOutput,
+  _documentText: string,
+  domain: string,
+  source: "claude" | "gemini"
+): CaseAnalysis {
+  const deadlines = (out.deadlines || []).map((d) => {
+    // Never trust the model's daysLeft — recompute, or null it out.
+    const dt = d.date ? parseDate(d.date) : null;
+    return { ...d, daysLeft: dt ? daysBetween(dt) : null };
+  });
+  const soonest = deadlines
+    .map((d) => d.daysLeft)
+    .filter((n): n is number => typeof n === "number" && n >= 0)
+    .sort((a, b) => a - b)[0];
+  const severity: Severity =
+    typeof soonest === "number" && soonest <= 30 ? "urgent" : out.severity;
+  return { ...out, deadlines, severity, domain, source };
+}
+
+async function runClaude(documentText: string, domain: string): Promise<ModelOutput> {
+  const model = process.env.CASEWORKER_MODEL || "claude-sonnet-4-6";
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": process.env.ANTHROPIC_API_KEY as string,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 2000,
+      system: SYSTEM_PROMPT,
+      tools: [ANALYSIS_TOOL],
+      tool_choice: { type: "tool", name: "return_analysis" },
+      messages: [{ role: "user", content: userPrompt(documentText, domain) }],
+    }),
+  });
+  if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  const toolUse = (data.content || []).find((c: { type: string }) => c.type === "tool_use");
+  if (!toolUse) throw new Error("No tool_use block in Claude response");
+  return toolUse.input as ModelOutput;
+}
+
+async function runGemini(documentText: string, domain: string): Promise<ModelOutput> {
+  const model = process.env.CASEWORKER_GEMINI_MODEL || "gemini-2.5-flash-lite";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      contents: [{ role: "user", parts: [{ text: userPrompt(documentText, domain) }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: GEMINI_SCHEMA,
+        maxOutputTokens: 2400,
+        temperature: 0.4,
+      },
+    }),
+  });
+  if (!res.ok) throw new Error(`Gemini API ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error("Empty Gemini response");
+  return JSON.parse(text) as ModelOutput;
 }
 
 // ── Deterministic demo fallback ──────────────────────────────────────
@@ -168,11 +269,20 @@ const MONTHS: Record<string, number> = {
 };
 
 function parseDate(s: string): Date | null {
+  if (!s) return null;
+  // 1) Month-name form (most common in these letters), parsed locally.
   const m = DATE_RE.exec(s);
   DATE_RE.lastIndex = 0;
-  if (!m) return null;
-  const month = MONTHS[m[1].slice(0, 3).toLowerCase()];
-  return new Date(Number(m[3]), month, Number(m[2]));
+  if (m) {
+    const month = MONTHS[m[1].slice(0, 3).toLowerCase()];
+    return new Date(Number(m[3]), month, Number(m[2]));
+  }
+  // 2) ISO (2026-08-30) or numeric (8/30/2026) — handle formats models emit.
+  const iso = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  const us = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (us) return new Date(Number(us[3]), Number(us[1]) - 1, Number(us[2]));
+  return null;
 }
 
 function daysBetween(target: Date): number {
