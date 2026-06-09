@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
+
+// Max characters sent to ElevenLabs — spoken summaries are short; this caps the
+// cost (and latency) of any single call.
+const MAX_TTS_LEN = 2000;
 
 // ElevenLabs text-to-speech. Returns audio/mpeg bytes the browser can play.
 // If no key is configured we return 204 so the UI quietly hides the button.
@@ -8,9 +13,21 @@ export async function POST(req: NextRequest) {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) return new NextResponse(null, { status: 204 });
 
-  const { text } = await req.json();
-  if (!text) return NextResponse.json({ error: "text required" }, { status: 400 });
+  // Throttle the paid TTS calls per client. On 429 the UI falls back to the
+  // browser's built-in speech synthesis, so the demo is never silent.
+  const rl = rateLimit(`speak:${clientIp(req.headers)}`, 20, 60_000);
+  if (!rl.ok) {
+    return new NextResponse(null, {
+      status: 429,
+      headers: { "retry-after": String(rl.retryAfter) },
+    });
+  }
 
+  const { text } = await req.json();
+  if (!text || typeof text !== "string")
+    return NextResponse.json({ error: "text required" }, { status: 400 });
+
+  const speech = text.slice(0, MAX_TTS_LEN);
   const voiceId = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";
 
   try {
@@ -24,7 +41,7 @@ export async function POST(req: NextRequest) {
           accept: "audio/mpeg",
         },
         body: JSON.stringify({
-          text,
+          text: speech,
           model_id: "eleven_turbo_v2_5",
           voice_settings: { stability: 0.5, similarity_boost: 0.75 },
         }),

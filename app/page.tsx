@@ -309,8 +309,8 @@ export default function Home() {
                 <h2>The letter you received</h2>
               </div>
 
-              <label className="field-label">Try a real example</label>
-              <div className="chips">
+              <div className="field-label" id="cw-samples-label">Try a real example</div>
+              <div className="chips" role="group" aria-labelledby="cw-samples-label">
                 {samples.map((s) => (
                   <button key={s.label} className="chip" onClick={() => loadSample(s)}>
                     {s.label}
@@ -318,9 +318,11 @@ export default function Home() {
                 ))}
               </div>
 
-              <label className="field-label">Upload your letter</label>
+              <div className="field-label" id="cw-upload-label">Upload your letter</div>
               <div
                 className={`dropwrap${dragOver ? " drag" : ""}`}
+                role="group"
+                aria-labelledby="cw-upload-label"
                 onDragOver={(e) => {
                   e.preventDefault();
                   setDragOver(true);
@@ -383,8 +385,8 @@ export default function Home() {
                 />
               </div>
 
-              <label className="field-label">What is this about?</label>
-              <select value={domain} onChange={(e) => setDomain(e.target.value)}>
+              <label className="field-label" htmlFor="cw-domain">What is this about?</label>
+              <select id="cw-domain" value={domain} onChange={(e) => setDomain(e.target.value)}>
                 {DOMAINS.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.label}
@@ -392,8 +394,9 @@ export default function Home() {
                 ))}
               </select>
 
-              <label className="field-label">Or paste the text</label>
+              <label className="field-label" htmlFor="cw-text">Or paste the text</label>
               <textarea
+                id="cw-text"
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 placeholder="Paste the letter, bill, or notice here — or add a note about the file above…"
@@ -422,7 +425,7 @@ export default function Home() {
             </div>
 
             {/* OUTPUT */}
-            <div className="pane">
+            <div className="pane" aria-live="polite" aria-busy={loading}>
               <div className="pane-head">
                 <span className="n">02</span>
                 <h2>Your advocacy plan</h2>

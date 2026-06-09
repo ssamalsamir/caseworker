@@ -124,7 +124,7 @@ a:hover { text-decoration: underline; }
 .pane-head h2 { margin: 0; font-size: 16px; font-weight: 600; color: var(--ink); letter-spacing: -0.01em; }
 
 .field-label { display: block; font-size: 13px; font-weight: 550; color: var(--ink); margin: 18px 0 8px; }
-.field-label:first-of-type { margin-top: 0; }
+.pane-head + .field-label { margin-top: 0; }
 
 .chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip {

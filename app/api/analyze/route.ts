@@ -5,6 +5,7 @@ import {
   NoModelForFileError,
   type FileInput,
 } from "@/lib/caseworker";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -12,8 +13,20 @@ export const maxDuration = 60;
 // Cap the base64 payload so the JSON body stays under the platform's request
 // limit (~4.5MB on Vercel). ~4.2M base64 chars ≈ 3.1MB decoded.
 const MAX_BASE64_LEN = 4_200_000;
+// Generous ceiling on pasted text — the model only reads the first 12K, so
+// anything past this is abuse, not a real document.
+const MAX_TEXT_LEN = 60_000;
 
 export async function POST(req: NextRequest) {
+  // Protect the paid model calls from a single client hammering the endpoint.
+  const rl = rateLimit(`analyze:${clientIp(req.headers)}`, 12, 60_000);
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "You're going a little fast — please wait a moment and try again." },
+      { status: 429, headers: { "retry-after": String(rl.retryAfter) } }
+    );
+  }
+
   try {
     const { documentText, domain, file } = await req.json();
 
@@ -41,6 +54,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "Provide documentText or a file" },
         { status: 400 }
+      );
+    }
+
+    if (typeof documentText === "string" && documentText.length > MAX_TEXT_LEN) {
+      return NextResponse.json(
+        { error: "That document is very long — please trim it, or upload the PDF instead." },
+        { status: 413 }
       );
     }
 
