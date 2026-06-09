@@ -185,40 +185,76 @@ export default function Home() {
     removeFile();
   }
 
+  function speakWithBrowser(text: string) {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      setSpeaking(false);
+      return;
+    }
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.02;
+    u.onend = () => setSpeaking(false);
+    u.onerror = () => setSpeaking(false);
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  }
+
   async function speak() {
     if (!result) return;
+    const text = result.spokenSummary;
     setSpeaking(true);
     try {
       const res = await fetch("/api/speak", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: result.spokenSummary }),
+        body: JSON.stringify({ text }),
       });
       if (res.ok && res.status !== 204) {
-        const blob = await res.blob();
-        const audio = new Audio(URL.createObjectURL(blob));
-        audio.onended = () => setSpeaking(false);
-        await audio.play();
+        const url = URL.createObjectURL(await res.blob());
+        const audio = new Audio(url);
+        // If hosted audio can't load or play, the plan must still be spoken —
+        // hand the same text to the browser's built-in voice exactly once.
+        let fellBack = false;
+        const fallBack = () => {
+          if (fellBack) return;
+          fellBack = true;
+          URL.revokeObjectURL(url);
+          speakWithBrowser(text);
+        };
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          setSpeaking(false);
+        };
+        audio.onerror = fallBack;
+        await audio.play().catch(fallBack);
         return;
       }
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        const u = new SpeechSynthesisUtterance(result.spokenSummary);
-        u.rate = 1.02;
-        u.onend = () => setSpeaking(false);
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(u);
-        return;
-      }
-      setSpeaking(false);
+      speakWithBrowser(text);
     } catch (e) {
       console.error(e);
-      setSpeaking(false);
+      speakWithBrowser(text);
     }
   }
 
   async function copyDraft() {
     if (!result) return;
-    await navigator.clipboard.writeText(result.draftResponse.body);
+    const body = result.draftResponse.body;
+    try {
+      await navigator.clipboard.writeText(body);
+    } catch {
+      // Clipboard access can be denied (permissions, embedded browsers) — fall
+      // back to a hidden textarea so Copy still works instead of throwing.
+      const ta = document.createElement("textarea");
+      ta.value = body;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+      } finally {
+        ta.remove();
+      }
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
@@ -564,9 +600,9 @@ export default function Home() {
                 </div>
                 <h4>It reads the fine print</h4>
                 <p>
-                  Snap a photo or drop a PDF — Claude reads adversarial
-                  bureaucratic language and pulls out the decision, the reason, the
-                  amounts, and every deadline.
+                  Snap a photo or drop a PDF — a frontier vision model reads
+                  adversarial bureaucratic language and pulls out the decision, the
+                  reason, the amounts, and every deadline.
                 </p>
               </div>
               <div className="feature">
@@ -618,9 +654,10 @@ export default function Home() {
         {/* BUILT WITH */}
         <section className="section tinted">
           <div className="container builtwith">
-            <div className="lab">Built on</div>
+            <div className="lab">Works with</div>
             <div className="logos">
               <span className="logo">Claude · Anthropic</span>
+              <span className="logo">Gemini</span>
               <span className="logo">ElevenLabs</span>
               <span className="logo">Model Context Protocol</span>
               <span className="logo">Vercel</span>
